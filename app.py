@@ -58,8 +58,8 @@ df = df.dropna()
 model = load_model()
 scaler = load_scaler()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Personal Data 📝", "Upload Data 📑", "Model Analysis 📊", "View Dataset 🗃️", "Summary Statistics 📈"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Personal Data 📝", "Upload Data 📑", "Team Division ⚖️", "Model Analysis 📊", "View Dataset 🗃️", "Summary Statistics 📈"
 ])
 
 with tab1:
@@ -164,6 +164,7 @@ with tab2:
             uploaded_df["Prediction"] = ["Introvert" if p == 1 else "Extrovert" for p in predictions]
             uploaded_df["Introvert %"] = [f"{proba[1]*100:.0f}%" for proba in probabilities]
             uploaded_df["Extrovert %"] = [f"{proba[0]*100:.0f}%" for proba in probabilities]
+            st.session_state.uploaded_df = uploaded_df
 
 
             st.success("Predictions added successfully")
@@ -173,10 +174,133 @@ with tab2:
             st.download_button("Download Results as CSV", csv_download, "predictions.csv", "text/csv")
 
         except Exception as e:
+
             st.error(f"Something went wrong: {e}")
 
 
 with tab3:
+    st.subheader("Team Division")
+
+    st.markdown("""
+There is no magic ratio of introverts to extroverts for a successful team. However, teams tend to do better with an equal mixture! This is because each personality type brings unique strengths to the table:
+
+- **Extroverts**: Excel at leading, networking, communication, energizing a team, and brainstorming.
+- **Introverts**: Excel at being strong listeners, thinkers, planners, and focusing on details.
+
+The tool below will divide your uploaded individuals into balanced teams, aiming for an equal split of introverts and extroverts. Each team will also include the following role recommendations:
+
+- **Leader**: The team member with the highest extrovert percentage.
+- **Planner**: The team member with the highest introvert percentage.
+- **Communicator**: A team member with no stage fright and the most social hours.
+- **Support**: All remaining members.
+
+If ideal matches are not found for specific roles, individuals will be assigned randomly.
+""")
+
+
+    if 'uploaded_df' not in st.session_state:
+        st.info("Please upload data first in the Upload Data tab.")
+    else:
+        df_teams = st.session_state.uploaded_df.copy()
+
+        if "Prediction" not in df_teams.columns:
+            st.error("No predictions found in uploaded data. Please upload and predict in the Upload Data tab first.")
+        else:
+            total_members = len(df_teams)
+            max_teams = max(1, total_members // 2)
+
+            num_teams = st.number_input(
+                "Number of Teams",
+                min_value=2,
+                max_value=max_teams,
+                value=2,
+                step=1,
+                help=f"Max teams is {max_teams}, so no team has less than 2 people."
+            )
+
+            introverts = df_teams[df_teams["Prediction"] == "Introvert"].sample(frac=1, random_state=42).reset_index(drop=True)
+            extroverts = df_teams[df_teams["Prediction"] == "Extrovert"].sample(frac=1, random_state=42).reset_index(drop=True)
+
+            teams = {i: [] for i in range(1, num_teams + 1)}
+
+            for i, (_, row) in enumerate(introverts.iterrows()):
+                team_num = (i % num_teams) + 1
+                teams[team_num].append(row)
+
+            for i, (_, row) in enumerate(extroverts.iterrows()):
+                team_num = (i % num_teams) + 1
+                teams[team_num].append(row)
+
+            for team_num, members in teams.items():
+                team_df = pd.DataFrame(members).reset_index(drop=True)
+
+                num_introverts = (team_df["Prediction"] == "Introvert").sum()
+                num_extroverts = (team_df["Prediction"] == "Extrovert").sum()
+                total = len(team_df)
+                introvert_pct = (num_introverts / total) * 100 if total > 0 else 0
+                extrovert_pct = (num_extroverts / total) * 100 if total > 0 else 0
+
+                st.write(f"### Team {team_num}: {num_introverts} Introverts ({introvert_pct:.0f}%), {num_extroverts} Extroverts ({extrovert_pct:.0f}%)")
+
+                team_df["Extrovert % float"] = team_df["Extrovert %"].str.rstrip("%").astype(float)
+                team_df["Introvert % float"] = team_df["Introvert %"].str.rstrip("%").astype(float)
+
+                leader_idx = team_df["Extrovert % float"].idxmax()
+                planner_idx = team_df["Introvert % float"].idxmax()
+
+                comm_candidates = team_df[team_df["Stage_fear"] == 0]
+                if len(comm_candidates) > 0:
+                    max_attendance = comm_candidates["Social_event_attendance"].max()
+                    communicators = comm_candidates[comm_candidates["Social_event_attendance"] == max_attendance]
+                    communicator_idx = communicators.sample(1).index[0]
+                else:
+                    communicator_idx = team_df.sample(1).index[0]
+
+                if communicator_idx in {leader_idx, planner_idx}:
+                    possible_idxs = set(team_df.index) - {leader_idx, planner_idx}
+                    if possible_idxs:
+                        communicator_idx = pd.Series(list(possible_idxs)).sample(1).iloc[0]
+                    else:
+                        communicator_idx = None
+
+                team_df["Role"] = ""
+
+                roles_order = ["Leader", "Planner", "Communicator", "Support"]
+                assigned_roles = {"Leader": leader_idx, "Planner": planner_idx, "Communicator": communicator_idx}
+
+                for i in range(len(team_df)):
+                    if i == leader_idx:
+                        team_df.at[i, "Role"] = "Leader"
+                    elif i == planner_idx:
+                        team_df.at[i, "Role"] = "Planner"
+                    elif communicator_idx is not None and i == communicator_idx:
+                        team_df.at[i, "Role"] = "Communicator"
+                    else:
+                        team_df.at[i, "Role"] = "Support"
+
+                role_counts = {role: sum(team_df["Role"] == role) for role in roles_order}
+                min_needed = {"Leader": 1, "Planner": 1, "Communicator": 1, "Support": 0}
+
+                for role in roles_order:
+                    if role_counts[role] == 0 and total < sum(min_needed[r] for r in roles_order if roles_order.index(r) <= roles_order.index(role)):
+                        team_df.loc[team_df["Role"] == role, "Role"] = "N/A"
+
+                st.dataframe(team_df.drop(columns=["Extrovert % float", "Introvert % float"]))
+
+                roles_summary = []
+                for role in roles_order:
+                    members_for_role = team_df[team_df["Role"] == role]
+                    if not members_for_role.empty and role != "N/A":
+                        member_names = members_for_role["Name"].tolist()
+                        roles_summary.append(f"**{role}:** {', '.join(member_names)}")
+                    else:
+                        roles_summary.append(f"**{role}:** N/A")
+
+                st.markdown("<br>".join(roles_summary), unsafe_allow_html=True)
+
+
+
+with tab4:
     st.subheader("Model Analysis")
 
     df["Stage_fear"] = df["Stage_fear"].map({"Yes": 1, "No": 0})
@@ -219,10 +343,10 @@ with tab3:
     st.pyplot(fig)
 
 
-with tab4:
+with tab5:
     st.subheader("View Dataset")
     st.dataframe(df)
 
-with tab5:
+with tab6:
     st.subheader("Summary Statistics")
     st.write(df.describe())
