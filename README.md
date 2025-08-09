@@ -56,3 +56,8 @@ The data was found on Rakesh Kapilavayi's Kaggle page, which can be found [here]
 2. Upload your own file, ensure it has the proper columns like in the original dataset.
      - Example .csv can be found on repository 
 4. Use the model's findings to create effective teams with specific roles. 
+
+--- 
+## Live Website
+
+[Click Here!](https://personalitytest.streamlit.app/)
