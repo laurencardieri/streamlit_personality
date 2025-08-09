@@ -54,4 +54,5 @@ The data was found on Rakesh Kapilavayi's Kaggle page, which can be found [here]
 
 1. Take the test to decipher whether you are an introvert or extrovert.
 2. Upload your own file, ensure it has the proper columns like in the original dataset.
-3. Use the model's findings to create effective teams with specific roles. 
+     - Example .csv can be found on repository 
+4. Use the model's findings to create effective teams with specific roles. 
